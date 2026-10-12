@@ -1,0 +1,210 @@
+# This workflow will build a package using Maven and then publish it to GitHub packages when a release is created
+# For more information see: https://github.com/actions/setup-java/blob/main/docs/advanced-usage.md#apache-maven-with-a-settings-path
+
+name: Maven Package
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up JDK 11
+      uses: actions/setup-java@v4
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+        server-id: github # Value of the distributionManagement/repository/id field of the pom.xml
+        settings-path: ${{ github.workspace }} # location for the settings.xml file
+
+    - name: Build with Maven
+      run: mvn -B package --file pom.xml
+
+    - name: Publish to GitHub Packages Apache Maven
+      run: mvn deploy -s $GITHUB_WORKSPACE/settings.xml
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+This is a GitHub Actions workflow that builds a Java/Maven project and publishes it to GitHub Packages when a release is created. Here's a breakdown and some suggestions:
+
+What it does
+
+1. Trigger: Runs when a GitHub release is created
+2. Permissions: Read repo contents, write packages
+3. Steps:
+   · Checks out the code
+   · Sets up JDK 11 (Temurin)
+   · Builds with mvn package
+   · Deploys to GitHub Packages using the auto-generated settings.xml
+
+Common Issues & Improvements
+
+1. GITHUB_TOKEN needs explicit reference
+
+${{ github.token }} works, but the more common/idiomatic form is ${{ secrets.GITHUB_TOKEN }}. Both are functionally equivalent.
+
+2. Missing fetch-depth (usually fine, but note it)
+
+actions/checkout@v4 defaults to a shallow clone. If your build needs git history (e.g., for git-commit-id-plugin), add:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+```
+
+3. Java version — verify your pom.xml targets 11
+
+If you compile with a newer JDK you can still target 11, but if you're on JDK 17/21, bump the version.
+
+4. Cache Maven dependencies
+
+setup-java@v4 supports built-in caching:
+
+```yaml
+- name: Set up JDK 11
+  uses: actions/setup-java@v4
+  with:
+    java-version: '11'
+    distribution: 'temurin'
+    server-id: github
+    settings-path: ${{ github.workspace }}
+    cache: maven
+```
+
+5. Make sure pom.xml has the right distributionManagement
+
+For publishing to GitHub Packages, your pom.xml should contain:
+
+```xml
+<distributionManagement>
+  <repository>
+    <id>github</id>
+    <name>GitHub Packages</name>
+    <url>https://maven.pkg.github.com/OWNER/REPO</url>
+  </repository>
+</distributionManagement>
+```
+
+The <id> must match server-id: github above.
+
+6. Consider running tests separately
+
+mvn package runs tests already, but if you want a clearer signal, split into mvn -B verify or run test in a separate job.
+
+7. Optional: skip deploy for snapshot/SNAPSHOT versions, or gate publishing
+
+You may want a condition so PRs or non-release builds don't attempt deployment (already handled since trigger is release: created).
+
+Polished version
+
+```yaml
+name: Maven Package
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          server-id: github
+          settings-path: ${{ github.workspace }}
+          cache: maven
+
+      - name: Build with Maven
+        run: mvn -B package --file pom.xml
+
+      - name: Publish to GitHub Packages Apache Maven
+        run: mvn -B deploy -s $GITHUB_WORKSPACE/settings.xml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+Was there a specific problem you were running into, or did you want help with a modification?Not sure exactly what you mean by “Next” — here are the two most likely things you might want:
+
+Option 1: The next workflow — a Maven CI workflow
+
+If you want a CI workflow that runs on pushes and pull requests (instead of only on release), here’s a typical maven-ci.yml:
+
+```yaml
+name: Maven CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build and test with Maven
+        run: mvn -B verify --file pom.xml
+```
+
+This is separate from maven-publish.yml:
+
+· maven-ci.yml → runs on every push/PR, builds and tests.
+· maven-publish.yml → runs only when a release is created, and deploys to GitHub Packages.
+
+Option 2: Next improvements for your existing maven-publish.yml
+
+If you meant “what should I do next with that file,” these are the main ones:
+
+1. Add Maven dependency caching:
+   ```yaml
+   cache: maven
+   ```
+2. Use secrets.GITHUB_TOKEN instead of github.token for clarity:
+   ```yaml
+   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+   ```
+3. Make sure pom.xml has the matching distributionManagement:
+   ```xml
+   <distributionManagement>
+     <repository>
+       <id>github</id>
+       <url>https://maven.pkg.github.com/OWNER/REPO</url>
+     </repository>
+   </distributionManagement>
+   ```
+4. Consider a JDK matrix if you support multiple Java versions:
+   ```yaml
+   strategy:
+     matrix:
+       java: [ '11', '17', '21' ]
+   ```
+5. Add fetch-depth: 0 if any plugin needs full Git history.
+
+If you tell me which “next” you mean — next workflow, next improvement, or next file type like Docker/CodeQL — I can give you the exact one.
